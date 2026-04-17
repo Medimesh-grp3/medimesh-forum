@@ -153,18 +153,15 @@
   #           Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
   #           ════════════════════════════════════════════════════════
 
+
 name: "MediMesh — Forum Service CI/CD Pipeline"
 
 on:
   push:
     branches: [main]
-    paths:
-      - "/"
 
   pull_request:
     branches: [main]
-    paths:
-      - "/"
 
   workflow_dispatch:
 
@@ -184,7 +181,7 @@ jobs:
       - name: SonarQube Analysis
         uses: SonarSource/sonarqube-scan-action@v2
         with:
-          projectBaseDir: services/medimesh-forum
+          projectBaseDir: .
           args: >
             -Dsonar.projectKey=medimesh-forum
             -Dsonar.projectName=medimesh-forum
@@ -219,9 +216,6 @@ jobs:
     name: "②③ Build & Snyk — medimesh-forum"
     runs-on: ubuntu-latest
     needs: sonar-forum
-    defaults:
-      run:
-        working-directory: services/medimesh-forum
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -231,7 +225,7 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: "services/medimesh-forum/package.json"
+          cache-dependency-path: "package.json"
 
       - name: Install Dependencies
         run: npm install --no-audit --no-fund
@@ -268,8 +262,8 @@ jobs:
         with:
           name: snyk-report-medimesh-forum
           path: |
-            services/medimesh-forum/snyk-report.html
-            services/medimesh-forum/snyk-report.json
+            snyk-report.html
+            snyk-report.json
           retention-days: 14
           if-no-files-found: ignore
 
@@ -355,7 +349,7 @@ jobs:
             -t ${{ steps.meta.outputs.tag_sha }} \
             -t ${{ steps.meta.outputs.tag_latest }} \
             -f Dockerfile \
-            services/medimesh-forum
+            .
 
       - name: "⑤ Trivy — Container Scan"
         uses: aquasecurity/trivy-action@master
