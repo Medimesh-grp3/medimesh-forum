@@ -159,12 +159,12 @@ on:
   push:
     branches: [main]
     paths:
-      - "services/medimesh-forum/**"
+      - "/"
 
   pull_request:
     branches: [main]
     paths:
-      - "services/medimesh-forum/**"
+      - "/"
 
   workflow_dispatch:
 
