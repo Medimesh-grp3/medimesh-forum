@@ -354,7 +354,7 @@ jobs:
             -t ${{ steps.meta.outputs.tag_version }} \
             -t ${{ steps.meta.outputs.tag_sha }} \
             -t ${{ steps.meta.outputs.tag_latest }} \
-            -f services/medimesh-forum/Dockerfile \
+            -f Dockerfile \
             services/medimesh-forum
 
       - name: "⑤ Trivy — Container Scan"
