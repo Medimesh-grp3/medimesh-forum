@@ -230,16 +230,64 @@ jobs:
 
 # 7. APPROVAL GATE — Pauses for Human Approval
   approval-forum:
+    name: "7. Approval Gate — medimesh-forum"
+    runs-on: ubuntu-latest
     needs: docker-forum
-    uses: Medimesh-grp3/template-ci/.github/workflows/template-approval-gate.yml@main
-    with:
-      service_name: medimesh-forum
-      image_tag:    ${{ needs.docker-forum.outputs.version }}
-      values_key:   forum
-    secrets:
-      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-      ALERT_EMAIL:   ${{ secrets.ALERT_EMAIL }}
+    environment: Prod
+    steps:
+      - name: Send Approval Request Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "Approval Needed — medimesh-forum → ${{ needs.docker-forum.outputs.version }}"
+          to: ${{ secrets.ALERT_EMAIL }}
+          from: MediMesh CD Pipeline
+          body: |
+            ════════════════════════════════════════════════════════════
+            MediMesh — DEPLOYMENT APPROVAL REQUIRED
+            ════════════════════════════════════════════════════════════
+
+            A new Docker image has been built and pushed.
+            It is NOW WAITING for your approval to deploy.
+
+            ────────────────────────────────────────────────────────────
+            Details:
+            ────────────────────────────────────────────────────────────
+            Service     : medimesh-forum
+            Image Tag   : ${{ needs.docker-forum.outputs.version }}
+            Values File : helm/forum/values.yaml
+            Triggered By: ${{ github.actor }}
+            Branch      : ${{ github.ref_name }}
+
+            ────────────────────────────────────────────────────────────
+            TO APPROVE (deploys to cluster):
+            ────────────────────────────────────────────────────────────
+            1. Open this link:
+               ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            2. Click "Review deployments"
+            3. Select "Prod"
+            4. Click "Approve and deploy"
+
+            ────────────────────────────────────────────────────────────
+            TO REJECT (stops pipeline, nothing deploys):
+            ────────────────────────────────────────────────────────────
+            Same link → Click "Reject"
+
+            ════════════════════════════════════════════════════════════
+
+      - name: Log Approval
+        run: |
+          echo "════════════════════════════════════════"
+          echo "  Deployment Approved!"
+          echo "  Service     : medimesh-forum"
+          echo "  Image Tag   : ${{ needs.docker-forum.outputs.version }}"
+          echo "  Values File : helm/forum/values.yaml"
+          echo "  Approved By : ${{ github.actor }}"
+          echo "  Timestamp   : $(date -u)"
+          echo "════════════════════════════════════════"
 
 # 8. CD — ARGOCD MANIFEST UPDATE
   cd-forum:
@@ -288,7 +336,7 @@ jobs:
             exit 0
           fi
 
-          git commit -m " cd(medimesh-forum): image → ${{ needs.docker-forum.outputs.version }}"
+          git commit -m "cd(medimesh-forum): image → ${{ needs.docker-forum.outputs.version }}"
 
           for i in 1 2 3 4 5; do
             git push && break
