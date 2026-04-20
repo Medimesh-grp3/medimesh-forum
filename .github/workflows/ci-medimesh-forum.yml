@@ -1,3 +1,397 @@
+# name: "MediMesh — Forum Service CI/CD Pipeline"
+
+# on:
+#   push:
+#     branches: [main]
+
+#   pull_request:
+#     branches: [main]
+
+#   workflow_dispatch:
+
+# jobs:
+# # 1. SONARQUBE
+#   sonar-forum:
+#     name: "1 SonarQube — medimesh-forum"
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+
+#       - name: SonarQube Analysis
+#         uses: SonarSource/sonarqube-scan-action@v2
+#         with:
+#           projectBaseDir: .
+#           args: >
+#             -Dsonar.projectKey=medimesh-forum
+#             -Dsonar.projectName=medimesh-forum
+#         env:
+#           SONAR_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}
+#           SONAR_HOST_URL: ${{ secrets.SONARQUBE_URL }}
+
+#       - name: Send Email on Failure
+#         if: failure()
+#         uses: dawidd6/action-send-mail@v3
+#         with:
+#           server_address: smtp.gmail.com
+#           server_port: 465
+#           username: ${{ secrets.SMTP_USERNAME }}
+#           password: ${{ secrets.SMTP_PASSWORD }}
+#           subject: "MediMesh CI Failed — SonarQube (medimesh-forum)"
+#           to: ${{ secrets.ALERT_EMAIL }}
+#           from: MediMesh CI Pipeline
+#           body: |
+#             SonarQube scan FAILED for: medimesh-forum
+
+#             Branch : ${{ github.ref_name }}
+#             Commit : ${{ github.sha }}
+#             Author : ${{ github.actor }}
+
+#             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+# # 2. BUILD + 3. SNYK
+#   build-forum:
+#     name: "2,3 Build & Snyk — medimesh-forum"
+#     runs-on: ubuntu-latest
+#     needs: sonar-forum
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
+
+#       - name: Setup Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: "20"
+#           cache: npm
+#           cache-dependency-path: "package.json"
+
+#       - name: Install Dependencies
+#         run: npm install --no-audit --no-fund
+
+#       - name: Build Project
+#         run: npm run build --if-present
+
+#       - name: Setup Snyk
+#         uses: snyk/actions/setup@master
+
+#       - name: Install snyk-to-html
+#         run: npm install -g snyk-to-html
+
+#       - name: Snyk Security Scan
+#         run: |
+#           snyk test \
+#             --severity-threshold=high \
+#             --json-file-output=snyk-report.json || true
+#         env:
+#           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+#       - name: Convert Snyk Report to HTML
+#         run: |
+#           if [ -f snyk-report.json ]; then
+#             snyk-to-html -i snyk-report.json -o snyk-report.html
+#             echo "Snyk HTML report generated"
+#           else
+#             echo "No Snyk JSON report found"
+#           fi
+
+#       - name: Upload Snyk Report
+#         uses: actions/upload-artifact@v4
+#         if: always()
+#         with:
+#           name: snyk-report-medimesh-forum
+#           path: |
+#             snyk-report.html
+#             snyk-report.json
+#           retention-days: 14
+#           if-no-files-found: ignore
+
+#       - name: Send Email on Failure
+#         if: failure()
+#         uses: dawidd6/action-send-mail@v3
+#         with:
+#           server_address: smtp.gmail.com
+#           server_port: 465
+#           username: ${{ secrets.SMTP_USERNAME }}
+#           password: ${{ secrets.SMTP_PASSWORD }}
+#           subject: "MediMesh CI Failed — Build (medimesh-forum)"
+#           to: ${{ secrets.ALERT_EMAIL }}
+#           from: MediMesh CI Pipeline
+#           body: |
+#             Build/Snyk FAILED for: medimesh-forum
+
+#             Branch : ${{ github.ref_name }}
+#             Commit : ${{ github.sha }}
+#             Author : ${{ github.actor }}
+
+#             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+# # 4,5,6 DOCKER BUILD + TRIVY + PUSH
+#   docker-forum:
+#     name: "4,5,6 Docker — medimesh-forum"
+#     runs-on: ubuntu-latest
+#     needs: build-forum
+#     permissions:
+#       contents: write
+#     outputs:
+#       version: ${{ steps.meta.outputs.version }}
+#     steps:
+#       - name: Checkout
+#         uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+
+#       - name: Determine Semantic Version
+#         id: version
+#         uses: mathieudutour/github-tag-action@v6.2
+#         with:
+#           github_token: ${{ github.token }}
+#           tag_prefix: "medimesh-forum/v"
+#           default_bump: patch
+#           initial_version: "1.0.0"
+#           custom_release_rules: "feature:minor:Features,breaking:major:Breaking Changes"
+#           dry_run: ${{ github.event_name == 'pull_request' }}
+
+#       - name: Setup Docker Buildx
+#         uses: docker/setup-buildx-action@v3
+
+#       - name: Login to Docker Hub
+#         uses: docker/login-action@v3
+#         with:
+#           username: ${{ secrets.DOCKERHUB_USERNAME }}
+#           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+#       - name: Extract Image Tags
+#         id: meta
+#         run: |
+#           SHORT_SHA=$(git rev-parse --short HEAD)
+#           VERSION="${{ steps.version.outputs.new_version }}"
+#           IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/medimesh_medimesh-forum"
+
+#           echo "tag_version=${IMAGE}:v${VERSION}"          >> $GITHUB_OUTPUT
+#           echo "tag_sha=${IMAGE}:v${VERSION}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+#           echo "tag_latest=${IMAGE}:latest"                >> $GITHUB_OUTPUT
+#           echo "version=v${VERSION}"                       >> $GITHUB_OUTPUT
+
+#           echo "════════════════════════════════════════"
+#           echo "  Image  : ${IMAGE}"
+#           echo "  Version: v${VERSION}"
+#           echo "  SHA    : v${VERSION}-${SHORT_SHA}"
+#           echo "════════════════════════════════════════"
+
+#       - name: "4. Build Docker Image"
+#         run: |
+#           docker build \
+#             -t ${{ steps.meta.outputs.tag_version }} \
+#             -t ${{ steps.meta.outputs.tag_sha }} \
+#             -t ${{ steps.meta.outputs.tag_latest }} \
+#             -f Dockerfile \
+#             .
+
+#       - name: "5. Trivy — Container Scan"
+#         uses: aquasecurity/trivy-action@master
+#         continue-on-error: true
+#         with:
+#           image-ref: ${{ steps.meta.outputs.tag_version }}
+#           format: table
+#           exit-code: "1"
+#           severity: CRITICAL,HIGH
+#           ignore-unfixed: true
+
+#       - name: "6. Push Docker Image to DockerHub"
+#         if: github.event_name != 'pull_request'
+#         run: |
+#           echo "Pushing images..."
+#           docker push ${{ steps.meta.outputs.tag_version }}
+#           docker push ${{ steps.meta.outputs.tag_sha }}
+#           docker push ${{ steps.meta.outputs.tag_latest }}
+#           echo "All tags pushed"
+
+#       - name: Send Email on Failure
+#         if: failure()
+#         uses: dawidd6/action-send-mail@v3
+#         with:
+#           server_address: smtp.gmail.com
+#           server_port: 465
+#           username: ${{ secrets.SMTP_USERNAME }}
+#           password: ${{ secrets.SMTP_PASSWORD }}
+#           subject: "MediMesh CI Failed — Docker (medimesh-forum)"
+#           to: ${{ secrets.ALERT_EMAIL }}
+#           from: MediMesh CI Pipeline
+#           body: |
+#             Docker build/push FAILED for: medimesh-forum
+
+#             Branch : ${{ github.ref_name }}
+#             Commit : ${{ github.sha }}
+#             Author : ${{ github.actor }}
+
+#             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+# # 7. APPROVAL GATE — Pauses for Human Approval
+#   approval-forum:
+#     name: "7. Approval Gate — medimesh-forum"
+#     runs-on: ubuntu-latest
+#     needs: docker-forum
+#     environment: Prod
+#     steps:
+#       - name: Send Approval Request Email
+#         uses: dawidd6/action-send-mail@v3
+#         with:
+#           server_address: smtp.gmail.com
+#           server_port: 465
+#           username: ${{ secrets.SMTP_USERNAME }}
+#           password: ${{ secrets.SMTP_PASSWORD }}
+#           subject: "Approval Needed — medimesh-forum → ${{ needs.docker-forum.outputs.version }}"
+#           to: ${{ secrets.ALERT_EMAIL }}
+#           from: MediMesh CD Pipeline
+#           body: |
+#             ════════════════════════════════════════════════════════════
+#             MediMesh — DEPLOYMENT APPROVAL REQUIRED
+#             ════════════════════════════════════════════════════════════
+
+#             A new Docker image has been built and pushed.
+#             It is NOW WAITING for your approval to deploy.
+
+#             ────────────────────────────────────────────────────────────
+#             Details:
+#             ────────────────────────────────────────────────────────────
+#             Service     : medimesh-forum
+#             Image Tag   : ${{ needs.docker-forum.outputs.version }}
+#             Values File : helm/forum/values.yaml
+#             Triggered By: ${{ github.actor }}
+#             Branch      : ${{ github.ref_name }}
+
+#             ────────────────────────────────────────────────────────────
+#             TO APPROVE (deploys to cluster):
+#             ────────────────────────────────────────────────────────────
+#             1. Open this link:
+#                ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+#             2. Click "Review deployments"
+#             3. Select "Prod"
+#             4. Click "Approve and deploy"
+
+#             ────────────────────────────────────────────────────────────
+#             TO REJECT (stops pipeline, nothing deploys):
+#             ────────────────────────────────────────────────────────────
+#             Same link → Click "Reject"
+
+#             ════════════════════════════════════════════════════════════
+
+#       - name: Log Approval
+#         run: |
+#           echo "════════════════════════════════════════"
+#           echo "  Deployment Approved!"
+#           echo "  Service     : medimesh-forum"
+#           echo "  Image Tag   : ${{ needs.docker-forum.outputs.version }}"
+#           echo "  Values File : helm/forum/values.yaml"
+#           echo "  Approved By : ${{ github.actor }}"
+#           echo "  Timestamp   : $(date -u)"
+#           echo "════════════════════════════════════════"
+
+# # 8. CD — ARGOCD MANIFEST UPDATE
+#   cd-forum:
+#     name: "8. CD — medimesh-forum"
+#     runs-on: ubuntu-latest
+#     needs: [docker-forum, approval-forum]
+#     if: github.event_name != 'pull_request'
+#     steps:
+#       - name: Checkout manifest_repo
+#         uses: actions/checkout@v4
+#         with:
+#           repository: Medimesh-grp3/manifest_repo   # ← FIXED: was ArgoCDrepo
+#           token: ${{ secrets.MANIFEST_REPO_PAT }}
+#           ref: main
+
+#       - name: Install yq
+#         run: |
+#           sudo wget -qO /usr/local/bin/yq \
+#             https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+#           sudo chmod +x /usr/local/bin/yq
+#           yq --version
+
+#       - name: Show current tag
+#         run: |
+#           echo "Current tag for forum:"
+#           yq '.image.tag' helm/forum/values.yaml   # ← FIXED: was helm/medimesh/values.yaml
+
+#       - name: Update image tag
+#         run: |
+#           yq -i \
+#             '.image.tag = "${{ needs.docker-forum.outputs.version }}"' \
+#             helm/forum/values.yaml                  # ← FIXED: was helm/medimesh/values.yaml
+
+#           echo "New tag for forum:"
+#           yq '.image.tag' helm/forum/values.yaml   # ← FIXED: was helm/medimesh/values.yaml
+
+#       - name: Commit and push
+#         run: |
+#           git config user.name  "github-actions[bot]"
+#           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+#           git add helm/forum/values.yaml            # ← FIXED: was helm/medimesh/values.yaml
+
+#           if git diff --staged --quiet; then
+#             echo "No changes to commit"
+#             exit 0
+#           fi
+
+#           git commit -m "cd(medimesh-forum): image → ${{ needs.docker-forum.outputs.version }}"
+
+#           for i in 1 2 3 4 5; do
+#             git push && break
+#             echo "Push failed, retry $i/5..."
+#             git pull --rebase origin main
+#             sleep $((i * 2))
+#           done
+
+#       - name: Send Success Email
+#         if: success()
+#         uses: dawidd6/action-send-mail@v3
+#         with:
+#           server_address: smtp.gmail.com
+#           server_port: 465
+#           username: ${{ secrets.SMTP_USERNAME }}
+#           password: ${{ secrets.SMTP_PASSWORD }}
+#           subject: "MediMesh CD — medimesh-forum deploying ${{ needs.docker-forum.outputs.version }}"
+#           to: ${{ secrets.ALERT_EMAIL }}
+#           from: MediMesh CD Pipeline
+#           body: |
+#             ════════════════════════════════════════════════════
+#             MediMesh CD — Deployment Triggered
+#             ════════════════════════════════════════════════════
+
+#             Service    : medimesh-forum
+#             New Image  : ${{ needs.docker-forum.outputs.version }}
+#             Values File: helm/forum/values.yaml
+#             Values Key : .image.tag
+
+#             ArgoCD will auto-sync to cluster within 3 minutes.
+
+#             manifest_repo: https://github.com/Medimesh-grp3/manifest_repo
+#             ════════════════════════════════════════════════════
+
+#       - name: Send Failure Email
+#         if: failure()
+#         uses: dawidd6/action-send-mail@v3
+#         with:
+#           server_address: smtp.gmail.com
+#           server_port: 465
+#           username: ${{ secrets.SMTP_USERNAME }}
+#           password: ${{ secrets.SMTP_PASSWORD }}
+#           subject: "MediMesh CD Failed — medimesh-forum"
+#           to: ${{ secrets.ALERT_EMAIL }}
+#           from: MediMesh CD Pipeline
+#           body: |
+#             CD manifest update FAILED for: medimesh-forum
+
+#             Image Tag  : ${{ needs.docker-forum.outputs.version }}
+#             Values File: helm/forum/values.yaml
+#             Author     : ${{ github.actor }}
+
+#             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+
 name: "MediMesh — Forum Service CI/CD Pipeline"
 
 on:
@@ -7,12 +401,17 @@ on:
   pull_request:
     branches: [main]
 
+  release:
+    types: [published]
+
   workflow_dispatch:
 
 jobs:
 # 1. SONARQUBE
   sonar-forum:
     name: "1 SonarQube — medimesh-forum"
+    # Skip on release events — CI already ran when the image was built
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -54,6 +453,7 @@ jobs:
 # 2. BUILD + 3. SNYK
   build-forum:
     name: "2,3 Build & Snyk — medimesh-forum"
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     needs: sonar-forum
     steps:
@@ -130,6 +530,7 @@ jobs:
 # 4,5,6 DOCKER BUILD + TRIVY + PUSH
   docker-forum:
     name: "4,5,6 Docker — medimesh-forum"
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     needs: build-forum
     permissions:
@@ -228,13 +629,72 @@ jobs:
 
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-# 7. APPROVAL GATE — Pauses for Human Approval
-  approval-forum:
-    name: "7. Approval Gate — medimesh-forum"
+#  Creates a Draft Release after Docker push
+
+  release-forum:
+    name: "7. Create Draft Release — medimesh-forum"
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     needs: docker-forum
+    permissions:
+      contents: write
+    steps:
+      - name: Create Draft GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          tag_name: "medimesh-forum/${{ needs.docker-forum.outputs.version }}"
+          name: "medimesh-forum ${{ needs.docker-forum.outputs.version }}"
+          body: |
+            ## medimesh-forum ${{ needs.docker-forum.outputs.version }}
+
+            ### Docker Image
+            ```
+            ${{ secrets.DOCKERHUB_USERNAME }}/medimesh_medimesh-forum:${{ needs.docker-forum.outputs.version }}
+            ```
+
+            | Field  | Value |
+            |--------|-------|
+            | Branch | ${{ github.ref_name }} |
+            | Commit | ${{ github.sha }} |
+            | Author | ${{ github.actor }} |
+
+            ---
+            > ⚠️ **Publishing this release will trigger deployment to production.**
+
+      - name: Send Email — Release Ready
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "Release Ready — medimesh-forum ${{ needs.docker-forum.outputs.version }}"
+          to: ${{ secrets.ALERT_EMAIL }}
+          from: MediMesh CI Pipeline
+          body: |
+            Docker image pushed. A Draft Release has been created.
+
+            To deploy → Go to Releases → Publish the draft:
+            ${{ github.server_url }}/${{ github.repository }}/releases
+
+            Version: ${{ needs.docker-forum.outputs.version }}
+
+# 8. APPROVAL GATE — Only runs when Release is PUBLISHED
+  approval-forum:
+    name: "8. Approval Gate — medimesh-forum"
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
     environment: Prod
     steps:
+      - name: Extract version from release tag
+        id: info
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#medimesh-forum/}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Release version: ${VERSION}"
+
       - name: Send Approval Request Email
         uses: dawidd6/action-send-mail@v3
         with:
@@ -242,7 +702,7 @@ jobs:
           server_port: 465
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
-          subject: "Approval Needed — medimesh-forum → ${{ needs.docker-forum.outputs.version }}"
+          subject: "Approval Needed — medimesh-forum → ${{ steps.info.outputs.version }}"
           to: ${{ secrets.ALERT_EMAIL }}
           from: MediMesh CD Pipeline
           body: |
@@ -250,56 +710,36 @@ jobs:
             MediMesh — DEPLOYMENT APPROVAL REQUIRED
             ════════════════════════════════════════════════════════════
 
-            A new Docker image has been built and pushed.
-            It is NOW WAITING for your approval to deploy.
+            Release "${{ github.event.release.name }}" has been published.
+            Waiting for approval to deploy.
 
-            ────────────────────────────────────────────────────────────
-            Details:
             ────────────────────────────────────────────────────────────
             Service     : medimesh-forum
-            Image Tag   : ${{ needs.docker-forum.outputs.version }}
-            Values File : helm/forum/values.yaml
-            Triggered By: ${{ github.actor }}
-            Branch      : ${{ github.ref_name }}
+            Version     : ${{ steps.info.outputs.version }}
+            Release URL : ${{ github.event.release.html_url }}
+            Published By: ${{ github.actor }}
 
             ────────────────────────────────────────────────────────────
-            TO APPROVE (deploys to cluster):
-            ────────────────────────────────────────────────────────────
-            1. Open this link:
-               ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            2. Click "Review deployments"
-            3. Select "Prod"
-            4. Click "Approve and deploy"
-
-            ────────────────────────────────────────────────────────────
-            TO REJECT (stops pipeline, nothing deploys):
-            ────────────────────────────────────────────────────────────
-            Same link → Click "Reject"
-
+            TO APPROVE:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
             ════════════════════════════════════════════════════════════
 
       - name: Log Approval
-        run: |
-          echo "════════════════════════════════════════"
-          echo "  Deployment Approved!"
-          echo "  Service     : medimesh-forum"
-          echo "  Image Tag   : ${{ needs.docker-forum.outputs.version }}"
-          echo "  Values File : helm/forum/values.yaml"
-          echo "  Approved By : ${{ github.actor }}"
-          echo "  Timestamp   : $(date -u)"
-          echo "════════════════════════════════════════"
+        run: echo "Approved by ${{ github.actor }} at $(date -u)"
+    outputs:
+      version: ${{ steps.info.outputs.version }}
 
-# 8. CD — ARGOCD MANIFEST UPDATE
+# 9. CD — ARGOCD MANIFEST UPDATE — Only after Release + Approval
   cd-forum:
-    name: "8. CD — medimesh-forum"
+    name: "9. CD — medimesh-forum"
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
-    needs: [docker-forum, approval-forum]
-    if: github.event_name != 'pull_request'
+    needs: approval-forum
     steps:
       - name: Checkout manifest_repo
         uses: actions/checkout@v4
         with:
-          repository: Medimesh-grp3/manifest_repo   # ← FIXED: was ArgoCDrepo
+          repository: Medimesh-grp3/manifest_repo
           token: ${{ secrets.MANIFEST_REPO_PAT }}
           ref: main
 
@@ -313,30 +753,30 @@ jobs:
       - name: Show current tag
         run: |
           echo "Current tag for forum:"
-          yq '.image.tag' helm/forum/values.yaml   # ← FIXED: was helm/medimesh/values.yaml
+          yq '.image.tag' helm/forum/values.yaml
 
       - name: Update image tag
         run: |
           yq -i \
-            '.image.tag = "${{ needs.docker-forum.outputs.version }}"' \
-            helm/forum/values.yaml                  # ← FIXED: was helm/medimesh/values.yaml
+            '.image.tag = "${{ needs.approval-forum.outputs.version }}"' \
+            helm/forum/values.yaml
 
           echo "New tag for forum:"
-          yq '.image.tag' helm/forum/values.yaml   # ← FIXED: was helm/medimesh/values.yaml
+          yq '.image.tag' helm/forum/values.yaml
 
       - name: Commit and push
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add helm/forum/values.yaml            # ← FIXED: was helm/medimesh/values.yaml
+          git add helm/forum/values.yaml
 
           if git diff --staged --quiet; then
             echo "No changes to commit"
             exit 0
           fi
 
-          git commit -m "cd(medimesh-forum): image → ${{ needs.docker-forum.outputs.version }}"
+          git commit -m "cd(medimesh-forum): image → ${{ needs.approval-forum.outputs.version }}"
 
           for i in 1 2 3 4 5; do
             git push && break
@@ -353,7 +793,7 @@ jobs:
           server_port: 465
           username: ${{ secrets.SMTP_USERNAME }}
           password: ${{ secrets.SMTP_PASSWORD }}
-          subject: "MediMesh CD — medimesh-forum deploying ${{ needs.docker-forum.outputs.version }}"
+          subject: "MediMesh CD — medimesh-forum deploying ${{ needs.approval-forum.outputs.version }}"
           to: ${{ secrets.ALERT_EMAIL }}
           from: MediMesh CD Pipeline
           body: |
@@ -362,11 +802,11 @@ jobs:
             ════════════════════════════════════════════════════
 
             Service    : medimesh-forum
-            New Image  : ${{ needs.docker-forum.outputs.version }}
+            New Image  : ${{ needs.approval-forum.outputs.version }}
+            Release    : ${{ github.event.release.name }}
             Values File: helm/forum/values.yaml
-            Values Key : .image.tag
 
-            ArgoCD will auto-sync to cluster within 3 minutes.
+            ArgoCD will auto-sync within 3 minutes.
 
             manifest_repo: https://github.com/Medimesh-grp3/manifest_repo
             ════════════════════════════════════════════════════
@@ -385,8 +825,7 @@ jobs:
           body: |
             CD manifest update FAILED for: medimesh-forum
 
-            Image Tag  : ${{ needs.docker-forum.outputs.version }}
-            Values File: helm/forum/values.yaml
+            Version    : ${{ needs.approval-forum.outputs.version }}
             Author     : ${{ github.actor }}
 
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
