@@ -739,7 +739,7 @@ jobs:
       - name: Checkout manifest_repo
         uses: actions/checkout@v4
         with:
-          repository: Medimesh-grp3/manifest_repo
+          repository: Medimesh-grp3/ArgoCDrepo
           token: ${{ secrets.MANIFEST_REPO_PAT }}
           ref: main
 
@@ -753,23 +753,23 @@ jobs:
       - name: Show current tag
         run: |
           echo "Current tag for forum:"
-          yq '.image.tag' helm/forum/values.yaml
+          yq '.image.tag' helm/medimesh/forum/values.yaml
 
       - name: Update image tag
         run: |
           yq -i \
             '.image.tag = "${{ needs.approval-forum.outputs.version }}"' \
-            helm/forum/values.yaml
+            helm/medimesh/forum/values.yaml
 
           echo "New tag for forum:"
-          yq '.image.tag' helm/forum/values.yaml
+          yq '.image.tag' helm/medimesh/forum/values.yaml
 
       - name: Commit and push
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add helm/forum/values.yaml
+          git add helm/medimesh/forum/values.yaml
 
           if git diff --staged --quiet; then
             echo "No changes to commit"
